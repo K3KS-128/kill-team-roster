@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kill Team Roster Dashboard</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Use Inter font -->
+    <style>
+        @import url('https://fonts.com/css2?family=Inter:wght@100..900&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+
+        /* Custom style for the compact weapon profile grid */
+        .weapon-grid-container {
+            display: grid;
+            grid-template-columns: minmax(100px, 3fr) 50px 70px 100px 50px; /* Name, A, Skill, Damage, Delete */
+            gap: 8px; /* Reduced gap for a tighter look */
+            align-items: center;
+        }
+
+        .weapon-grid-header {
+            font-weight: bold;
+            text-transform: uppercase;
+            color: #9ca3af; /* Gray-400 */
+            font-size: 0.75rem; /* text-xs */
+        }
+    </style>
+</head>
+<!-- Switched to a dark, high-contrast theme -->
+<body class="bg-gray-900 text-gray-100 min-h-screen p-4 md:p-8">
+
+    <div id="app-container" class="max-w-4xl mx-auto">
+        <header class="mb-8">
+            <!-- Lighter blue for contrast -->
+            <h1 class="text-4xl font-extrabold text-blue-400 mb-2 tracking-tight">KTDash Roster Builder</h1>
+            <p class="text-gray-400">Manage your operatives and track key stats for your tabletop games. All data saves automatically in your browser.</p>
+            <div id="user-info" class="mt-4 text-sm text-gray-400 flex items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 mr-2 text-blue-400">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" />
+                </svg>
+                Persistence: <span id="user-id" class="font-mono text-xs ml-2 text-blue-400">Local Storage Only (Cross-Tab Sync Enabled)</span>
+            </div>
+        </header>
+
+        <!-- Loading & Error Messages -->
+        <div id="loading-indicator" class="text-center p-6 bg-gray-800 rounded-xl shadow-lg my-8 hidden">
+            <div class="animate-pulse text-blue-400">Loading local data...</div>
+        </div>
+
+        <div id="error-message" class="bg-red-900 border border-red-500 text-red-300 p-4 rounded-xl mb-6 hidden" role="alert">
+            <p class="font-bold">Application Error:</p>
+            <p id="error-text"></p>
+        </div>
+
+        <!-- Roster Name & Add Operative Button -->
+        <div class="flex flex-col md:flex-row gap-4 items-stretch mb-6">
+            <input id="roster-name-input" type="text" placeholder="Enter Roster Name (e.g., Veteran Guardsmen)"
+                   class="flex-grow p-3 bg-gray-800 border border-gray-700 rounded-lg text-lg text-gray-100 placeholder-gray-500 focus:ring-blue-400 focus:border-blue-400 transition duration-150 shadow-md"
+                   oninput="app.updateRosterName(this.value)">
+
+            <button onclick="app.addOperative()"
+                    class="flex-shrink-0 bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-6 rounded-lg shadow-lg transition duration-200 transform hover:scale-[1.01] active:scale-[0.99] flex items-center justify-center">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5 mr-2">
+                    <path fill-rule="evenodd" d="M12 3.75a.75.75 0 0 1 .75.75v6.75h6.75a.75.75 0 0 1 0 1.5h-6.75v6.75a.75.75 0 0 1-1.5 0v-6.75H4.5a.75.75 0 0 1 0-1.5h6.75V4.5a.75.75 0 0 1 .75-.75Z" clip-rule="evenodd" />
+                </svg>
+                Add Operative
+            </button>
+        </div>
+
+        <!-- Operative List Container -->
+        <div class="text-center text-gray-500 p-8 border border-dashed border-gray-700 rounded-xl" id="empty-state">
+            No operatives yet! Click "Add Operative" to start building your kill team.
+        </div>
+        <div id="operative-list" class="space-y-4">
+            <!-- Operative Cards will be rendered here -->
+        </div>
+
+    </div>
+
+    <script>
+        // Use a fixed key for storing data in localStorage
+        const ROSTER_STORAGE_KEY = 'killTeamRosterData';
+        
+        // --- GLOBAL APP STATE & CORE LOGIC ---
+        window.app = {
+            roster: {
+                id: 'my_killteam_roster',
+                name: 'My Kill Team',
+                operatives: []
+            },
+            
+            // Utility function to show errors
+            showError(message) {
+                console.error("Application Error:", message);
+                document.getElementById('error-text').innerText = message;
+                document.getElementById('error-message').classList.remove('hidden');
+            },
+
+            // Generates a simple unique ID for operatives
+            generateId() {
+                return 'op-' + Math.random().toString(36).substring(2, 9);
+            },
+
+            // --- DATA MANIPULATION & UI RENDERING (Operative Stats) ---
+
+            // Updates a specific field on an operative
+            updateOperativeField(id, field, value) {
+                const operative = this.roster.operatives.find(op => op.id === id);
+                if (operative) {
+                    // Convert numeric fields to number type (Wounds, Move, APL)
+                    if (['wounds', 'currentWounds', 'move', 'apl'].includes(field)) {
+                        operative[field] = parseInt(value) || 0;
+                    } else {
+                        operative[field] = value;
+                    }
+                    
+                    // Ensure currentWounds never exceeds max wounds
+                    if (field === 'currentWounds' && operative.currentWounds > operative.wounds) {
+                        operative.currentWounds = operative.wounds;
+                    }
+                    
+                    this.saveRoster();
+                    // We only need to re-render the whole list if we change a property that affects 
+                    // a derived stat or the visual bar (like wounds), otherwise we rely on native input updates.
+                    if (field === 'wounds' || field === 'currentWounds') {
+                        this.renderOperativeList(); 
+                    }
+                }
+            },
+
+            // Updates the Roster Name
+            updateRosterName(name) {
+                this.roster.name = name;
+                this.saveRoster();
+                // No need to re-render the whole list for this
+            },
+
+            // Adds a new operative to the roster
+            addOperative() {
+                const opCount = this.roster.operatives.length + 1;
+                const newOp = {
+                    id: this.generateId(),
+                    name: `New Operative ${opCount}`,
+                    wounds: 10,
+                    currentWounds: 10,
+                    move: 3,
+                    save: '4+',
+                    apl: 2,
+                    ability: "N/A",
+                    weapons: [
+                        { id: this.generateId() + '-wr1', name: "Bolter", type: "Ranged", attacks: 4, skill: "3+", damageNormal: 3, damageCrit: 4, specialRules: "AP1" },
+                        { id: this.generateId() + '-wm1', name: "Fists/Knife", type: "Melee", attacks: 3, skill: "4+", damageNormal: 2, damageCrit: 3, specialRules: "Rending" },
+                        { id: this.generateId() + '-we1', name: "Frag Grenade", type: "Equipment", attacks: 0, skill: "-", damageNormal: 2, damageCrit: 3, specialRules: "Area, Blast" }
+                    ],
+                };
+                this.roster.operatives.push(newOp);
+                console.log("New operative added to data model:", newOp.name);
+                this.saveRoster();
+                this.renderOperativeList(); // CRITICAL: This must redraw the UI
+            },
+            
+            // Removes an operative
+            removeOperative(id) {
+                this.roster.operatives = this.roster.operatives.filter(op => op.id !== id);
+                this.saveRoster();
+                this.renderOperativeList();
+            },
+
+            // --- DATA MANIPULATION (Weapons) ---
+
+            // Adds a new weapon to a specific operative
+            addOperativeWeapon(opId, type = "Ranged") {
+                const operative = this.roster.operatives.find(op => op.id === opId);
+                if (operative) {
+                    if (!operative.weapons) operative.weapons = [];
+                    let defaultName = "New Ranged Weapon";
+                    let defaultSkill = "3+";
+                    let defaultRules = "P1";
+                    
+                    if (type === 'Melee') {
+                        defaultName = "New Melee Weapon";
+                        defaultSkill = "3+";
+                        defaultRules = "Lethal 5+";
+                    } else if (type === 'Equipment') {
+                        defaultName = "New Equipment";
+                        defaultSkill = "-";
+                        defaultRules = "Utility";
+                    }
+
+                    operative.weapons.push({
+                        id: this.generateId() + '-w',
+                        name: defaultName,
+                        type: type,
+                        attacks: type === 'Equipment' ? 0 : 4,
+                        skill: defaultSkill,
+                        damageNormal: type === 'Equipment' ? 0 : 3,
+                        damageCrit: type === 'Equipment' ? 0 : 4,
+                        specialRules: defaultRules
+                    });
+                    this.saveRoster();
+                    this.renderOperativeList(); // CRITICAL: This must redraw the UI
+                }
+            },
+
+            // Removes a weapon from an operative
+            removeOperativeWeapon(opId, wId) {
+                const operative = this.roster.operatives.find(op => op.id === opId);
+                if (operative && operative.weapons) {
+                    operative.weapons = operative.weapons.filter(w => w.id !== wId);
+                    this.saveRoster();
+                    this.renderOperativeList();
+                }
+            },
+
+            // Updates a field on a specific weapon
+            updateWeaponField(opId, wId, field, value) {
+                const operative = this.roster.operatives.find(op => op.id === opId);
+                if (operative && operative.weapons) {
+                    const weapon = operative.weapons.find(w => w.id === wId);
+                    if (weapon) {
+                        if (['attacks', 'damageNormal', 'damageCrit'].includes(field)) {
+                            weapon[field] = parseInt(value) || 0;
+                        } else {
+                            weapon[field] = value;
+                        }
+                        this.saveRoster();
+                        this.renderOperativeList(); // CRITICAL: Redraw to apply changes and re-enable inputs
+                    }
+                }
+            },
+            
+            // --- CROSS-TAB SYNC HANDLER ---
+            handleStorageChange(event) {
+                if (event.key === ROSTER_STORAGE_KEY && event.newValue !== null) {
+                    console.log("External storage change detected. Auto-refreshing UI.");
+                    try {
+                        const newData = JSON.parse(event.newValue);
+                        this.roster = { ...this.roster, ...newData };
+                        this.renderOperativeList();
+                    } catch (e) {
+                        this.showError(`Error parsing externally saved data: ${e.message}`);
+                    }
+                }
+            },
+
+            // --- UI RENDERING (Icons & Weapons) ---
+            
+            getIconSvg(type) {
+                if (type === 'Ranged') {
+                    return `<span title="Ranged" class="text-blue-400">🎯</span>`;
+                } else if (type === 'Melee') {
+                    return `<span title="Melee" class="text-red-400">⚔️</span>`;
+                } else if (type === 'Equipment') {
+                    return `<span title="Equipment" class="text-green-400">⚙️</span>`;
+                }
+                return '<span>?</span>';
+            },
+
+            // Helper function to render the weapon list for an operative
+            getWeaponsHtml(op) {
+                if (!op.weapons || !Array.isArray(op.weapons) || op.weapons.length === 0) {
+                    return `<p class="text-gray-600 italic p-2 text-center">No weapons assigned.</p>`;
+                }
+
+                const header = `
+                    <div class="weapon-grid-container text-gray-400 font-bold border-b border-gray-600 pb-2 mb-2">
+                        <div class="col-span-1 weapon-grid-header">Weapon Name & Rules</div>
+                        <div class="text-center weapon-grid-header">A</div>
+                        <div class="text-center weapon-grid-header">BS/WS</div>
+                        <div class="text-center weapon-grid-header">D (N/C)</div>
+                        <div></div> <!-- Delete placeholder -->
+                    </div>
+                `;
+
+                const rows = op.weapons.map(w => {
+                    const isEquipment = w.type === 'Equipment';
+                    const skillLabel = w.type === 'Ranged' ? 'BS' : 'WS';
+                    const attacksValue = w.attacks || (isEquipment ? '-' : 0);
+                    const skillValue = w.skill || (isEquipment ? '-' : '');
+                    const damageNormalValue = w.damageNormal || (isEquipment ? '-' : 0);
+                    const damageCritValue = w.damageCrit || (isEquipment ? '-' : 0);
+
+                    const attacksInputType = isEquipment ? 'text' : 'number';
+                    const damageInputType = isEquipment ? 'text' : 'number';
+
+                    return `
+                        <div class="weapon-grid-container items-start py-1 border-b border-gray-700 last:border-b-0">
+                            <!-- Icon, Name & Rules -->
+                            <div class="flex flex-col space-y-1">
+                                <!-- Icon and Name -->
+                                <div class="flex items-center space-x-2">
+                                    ${this.getIconSvg(w.type)}
+                                    <input type="text" value="${w.name}" placeholder="Name"
+                                        oninput="app.updateWeaponField('${op.id}', '${w.id}', 'name', this.value)"
+                                        class="flex-grow p-1 bg-gray-700 rounded text-gray-100 font-semibold outline-none text-sm min-w-0 border border-gray-600">
+                                </div>
+                                
+                                <!-- Special Rules Input -->
+                                <div class="flex items-center space-x-2 text-xs">
+                                    <span class="text-gray-500 ml-5 italic">(Rules):</span>
+                                    <input type="text" value="${w.specialRules}" placeholder="e.g. P1, Rending, Silent"
+                                        oninput="app.updateWeaponField('${op.id}', '${w.id}', 'specialRules', this.value)"
+                                        class="w-full p-1 bg-gray-700 rounded text-gray-300 outline-none border border-gray-600">
+                                </div>
+
+                                <!-- Type Switcher -->
+                                <select onchange="app.updateWeaponField('${op.id}', '${w.id}', 'type', this.value)"
+                                    class="w-full text-xs p-1 bg-gray-600 rounded text-gray-100 outline-none mt-1 border border-gray-600">
+                                    <option value="Ranged" ${w.type === 'Ranged' ? 'selected' : ''}>Ranged</option>
+                                    <option value="Melee" ${w.type === 'Melee' ? 'selected' : ''}>Melee</option>
+                                    <option value="Equipment" ${w.type === 'Equipment' ? 'selected' : ''}>Equipment</option>
+                                </select>
+                            </div>
+
+                            <!-- Attacks (A) -->
+                            <div class="text-center">
+                                <input type="${attacksInputType}" value="${attacksValue}" ${isEquipment ? 'disabled' : ''}
+                                    oninput="app.updateWeaponField('${op.id}', '${w.id}', 'attacks', this.value)"
+                                    class="w-full text-center bg-gray-700 rounded text-blue-400 font-bold p-1 outline-none border border-gray-600 disabled:bg-gray-800 disabled:text-gray-500">
+                            </div>
+
+                            <!-- Skill (BS / WS) -->
+                            <div class="text-center">
+                                <!-- <label class="block text-gray-500 text-xs mb-0.5">${isEquipment ? '-' : skillLabel}</label> -->
+                                <input type="text" value="${skillValue}" placeholder="3+" ${isEquipment ? 'disabled' : ''}
+                                    oninput="app.updateWeaponField('${op.id}', '${w.id}', 'skill', this.value)"
+                                    class="w-full text-center bg-gray-700 rounded text-blue-400 font-bold p-1 outline-none border border-gray-600 disabled:bg-gray-800 disabled:text-gray-500">
+                            </div>
+
+                            <!-- Damage (Normal / Crit) -->
+                            <div class="flex space-x-1 text-center">
+                                <input type="${damageInputType}" value="${damageNormalValue}" ${isEquipment ? 'disabled' : ''}
+                                    oninput="app.updateWeaponField('${op.id}', '${w.id}', 'damageNormal', this.value)"
+                                    class="w-1/2 text-center bg-gray-700 rounded text-blue-400 font-bold p-1 outline-none border border-gray-600 disabled:bg-gray-800 disabled:text-gray-500">
+                                <input type="${damageInputType}" value="${damageCritValue}" ${isEquipment ? 'disabled' : ''}
+                                    oninput="app.updateWeaponField('${op.id}', '${w.id}', 'damageCrit', this.value)"
+                                    class="w-1/2 text-center bg-gray-700 rounded text-blue-400 font-bold p-1 outline-none border border-gray-600 disabled:bg-gray-800 disabled:text-gray-500">
+                            </div>
+
+                            <!-- Delete Button -->
+                            <button onclick="app.removeOperativeWeapon('${op.id}', '${w.id}')" title="Remove Weapon"
+                                class="text-red-400 hover:text-red-500 transition duration-150 p-1 rounded-full hover:bg-gray-700 self-center">
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5">
+                                    <path fill-rule="evenodd" d="M16.5 4.478v.227a48.842 48.842 0 0 1 3.844.757.75.75 0 0 1 .672.433l.75 3c.092.368-.004.764-.242 1.055-1.742 2.716-1.742 7.113 0 9.83.238.291.33.687.242 1.055l-.75 3a.75.75 0 0 1-.672.433H6.223a.75.75 0 0 1-.672-.433l-.75-3a.75.75 0 0 1-.242-1.055c1.742-2.717 1.742-7.114 0-9.83a.75.75 0 0 1 .242-1.055l.75-3A.75.75 0 0 1 6.223 5.46a48.842 48.842 0 0 1 3.844-.757V4.478c0-.414.336-.75.75-.75h2.25c.414 0 .75.336.75.75Z" clip-rule="evenodd" />
+                                </svg>
+                            </button>
+                        </div>
+                    `;
+                }).join('');
+
+                return `
+                    <div class="space-y-3">
+                        ${header}
+                        ${rows}
+                    </div>
+                `;
+            },
+
+
+            // Main rendering function for the operative list - simplified
+            renderOperativeList() {
+                const container = document.getElementById('operative-list');
+                const emptyState = document.getElementById('empty-state');
+                
+                if (this.roster.operatives.length === 0) {
+                    emptyState.classList.remove('hidden');
+                } else {
+                    emptyState.classList.add('hidden');
+                }
+
+                // Generate the new HTML string from the data model
+                container.innerHTML = this.roster.operatives.map(op => `
+                    <div class="bg-gray-800 p-4 md:p-6 rounded-xl shadow-xl border-t-2 border-blue-600 hover:shadow-2xl transition duration-200">
+                        <!-- Header and Delete Button -->
+                        <div class="flex justify-between items-start mb-4">
+                            <input type="text" value="${op.name}" placeholder="Operative Name"
+                                oninput="app.updateOperativeField('${op.id}', 'name', this.value)"
+                                class="w-full text-xl md:text-2xl font-bold bg-transparent border-b border-gray-600 focus:border-blue-400 outline-none p-1 -ml-1 text-gray-100">
+                            <button onclick="app.removeOperative('${op.id}')" title="Delete Operative"
+                                class="ml-4 text-red-400 hover:text-red-500 transition duration-150 p-1 rounded-full hover:bg-gray-700">
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-6 h-6">
+                                    <path fill-rule="evenodd" d="M16.5 4.478v.227a48.842 48.842 0 0 1 3.844.757.75.75 0 0 1 .672.433l.75 3c.092.368-.004.764-.242 1.055-1.742 2.716-1.742 7.113 0 9.83.238.291.33.687.242 1.055l-.75 3a.75.75 0 0 1-.672.433H6.223a.75.75 0 0 1-.672-.433l-.75-3a.75.75 0 0 1-.242-1.055c1.742-2.717 1.742-7.114 0-9.83a.75.75 0 0 1 .242-1.055l.75-3A.75.75 0 0 1 6.223 5.46a48.842 48.842 0 0 1 3.844-.757V4.478c0-.414.336-.75.75-.75h2.25c.414 0 .75.336.75.75Z" clip-rule="evenodd" />
+                                </svg>
+                            </button>
+                        </div>
+                        
+                        <!-- Stats Grid (M, APL, Sv, W) -->
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                            <!-- Wounds / Current Wounds -->
+                            <div class="p-2 bg-gray-700 rounded-lg border border-gray-600">
+                                <label class="block text-gray-400 font-medium mb-1">Wounds (Current/Max)</label>
+                                <div class="flex space-x-2">
+                                    <input type="number" value="${op.currentWounds}" min="0" max="${op.wounds}"
+                                        oninput="app.updateOperativeField('${op.id}', 'currentWounds', this.value)"
+                                        class="w-1/2 p-1 bg-gray-700 rounded text-center text-blue-400 font-mono border border-gray-600">
+                                    <input type="number" value="${op.wounds}" min="1"
+                                        oninput="app.updateOperativeField('${op.id}', 'wounds', this.value)"
+                                        class="w-1/2 p-1 bg-gray-700 rounded text-center text-gray-300 font-mono border border-gray-600">
+                                </div>
+                                ${this.getWoundBarHtml(op.currentWounds, op.wounds)}
+                            </div>
+
+                            <!-- Move -->
+                            <div class="p-2 bg-gray-700 rounded-lg border border-gray-600 flex flex-col justify-between">
+                                <label class="block text-gray-400 font-medium mb-1">Move (M)</label>
+                                <input type="number" value="${op.move}" min="0" placeholder="e.g. 3"
+                                    oninput="app.updateOperativeField('${op.id}', 'move', this.value)"
+                                    class="w-full p-1 bg-gray-700 rounded text-center text-blue-400 font-mono h-10 border border-gray-600">
+                            </div>
+
+                            <!-- Save -->
+                            <div class="p-2 bg-gray-700 rounded-lg border border-gray-600 flex flex-col justify-between">
+                                <label class="block text-gray-400 font-medium mb-1">Save (Sv)</label>
+                                <input type="text" value="${op.save}" placeholder="e.g. 4+"
+                                    oninput="app.updateOperativeField('${op.id}', 'save', this.value)"
+                                    class="w-full p-1 bg-gray-700 rounded text-center text-blue-400 font-mono h-10 border border-gray-600">
+                            </div>
+                            
+                            <!-- APL (Action Point Limit) -->
+                            <div class="p-2 bg-gray-700 rounded-lg border border-gray-600 flex flex-col justify-between col-span-2 md:col-span-1">
+                                <label class="block text-gray-400 font-medium mb-1">APL</label>
+                                <input type="number" value="${op.apl}" min="1" placeholder="e.g. 2"
+                                    oninput="app.updateOperativeField('${op.id}', 'apl', this.value)"
+                                    class="w-full p-1 bg-gray-700 rounded text-center text-blue-400 font-mono h-10 border border-gray-600">
+                            </div>
+                            
+                            <!-- Ability (Full Width) -->
+                            <div class="col-span-4 p-2 bg-gray-700 rounded-lg border border-gray-600">
+                                <label class="block text-gray-400 font-medium mb-1">Ability/Keywords</label>
+                                <input type="text" value="${op.ability}" placeholder="e.g. Relentless, Grapple"
+                                    oninput="app.updateOperativeField('${op.id}', 'ability', this.value)"
+                                    class="w-full p-1 bg-gray-700 rounded text-gray-300 outline-none border border-gray-600">
+                            </div>
+                        </div>
+
+                        <!-- Weapons Section (Full Width) -->
+                        <div class="mt-6 col-span-4 p-4 bg-gray-700 rounded-lg border border-gray-600">
+                            <div class="flex justify-between items-center mb-3">
+                                <h3 class="text-lg font-bold text-gray-200">Weapons</h3>
+                                <div class="flex space-x-2">
+                                    <button onclick="app.addOperativeWeapon('${op.id}', 'Ranged')"
+                                            class="text-blue-400 hover:text-blue-300 transition duration-150 flex items-center text-sm font-medium py-1 px-3 rounded-md border border-blue-400 hover:border-blue-300 bg-gray-800">
+                                        🎯 Add Ranged
+                                    </button>
+                                    <button onclick="app.addOperativeWeapon('${op.id}', 'Melee')"
+                                            class="text-red-400 hover:text-red-300 transition duration-150 flex items-center text-sm font-medium py-1 px-3 rounded-md border border-red-400 hover:border-red-300 bg-gray-800">
+                                        ⚔️ Add Melee
+                                    </button>
+                                    <button onclick="app.addOperativeWeapon('${op.id}', 'Equipment')"
+                                            class="text-green-400 hover:text-green-300 transition duration-150 flex items-center text-sm font-medium py-1 px-3 rounded-md border border-green-400 hover:border-green-300 bg-gray-800">
+                                        ⚙️ Add Equipment
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="space-y-3">
+                                ${this.getWeaponsHtml(op)}
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+                
+                // Ensure name input is updated after load/render
+                document.getElementById('roster-name-input').value = this.roster.name;
+            },
+
+            // Generates the visual wound bar
+            getWoundBarHtml(current, max) {
+                const percentage = max > 0 ? (current / max) * 100 : 0;
+                let color = 'bg-green-500';
+                if (percentage < 33) {
+                    color = 'bg-red-500';
+                } else if (percentage < 66) {
+                    color = 'bg-yellow-500';
+                }
+                
+                return `
+                    <div class="mt-2 h-2 bg-gray-600 rounded-full overflow-hidden">
+                        <div class="${color} h-full transition-all duration-500 ease-in-out" style="width: ${percentage}%;"></div>
+                    </div>
+                `;
+            },
+            
+            // --- LOCAL STORAGE INTERACTION ---
+
+            // Save the current roster to localStorage
+            saveRoster() {
+                try {
+                    localStorage.setItem(ROSTER_STORAGE_KEY, JSON.stringify(this.roster));
+                } catch (e) {
+                    this.showError(`Failed to save roster to local storage: ${e.message}. Storage might be full.`);
+                }
+            },
+
+            // Load the roster from localStorage (replaces Firebase Listener)
+            loadRoster() {
+                document.getElementById('loading-indicator').classList.add('hidden');
+
+                try {
+                    const storedData = localStorage.getItem(ROSTER_STORAGE_KEY);
+                    if (storedData) {
+                        console.log("Roster data loaded from localStorage.");
+                        const data = JSON.parse(storedData);
+                        this.roster = { ...this.roster, ...data };
+                        
+                        // Defensive data migration/cleanup logic
+                        this.roster.operatives = this.roster.operatives.map(op => {
+                            op.apl = op.apl || 2;
+                            op.weapons = op.weapons || [];
+                            if (op.currentWounds > op.wounds) { op.currentWounds = op.wounds; }
+                            
+                            op.weapons = op.weapons.map(w => {
+                                w.id = w.id || this.generateId() + '-w';
+                                w.type = w.type || 'Ranged';
+                                w.damageNormal = w.damageNormal || 0;
+                                w.damageCrit = w.damageCrit || 0;
+                                w.specialRules = w.specialRules || "";
+                                return w;
+                            });
+                            return op;
+                        });
+                    } else {
+                        console.log("No roster found in localStorage, using default.");
+                        this.saveRoster(); 
+                    }
+                    
+                    this.renderOperativeList();
+
+                } catch (error) {
+                    this.showError(`Local storage retrieval failed: ${error.message}.`);
+                }
+            }
+        };
+
+        // --- APPLICATION INITIALIZATION ---
+
+        function initApp() {
+            // 1. Load initial data
+            window.app.loadRoster();
+            
+            // 2. Add listener for cross-tab synchronization
+            window.addEventListener('storage', window.app.handleStorageChange.bind(window.app));
+        }
+
+        // Start the application
+        document.getElementById('loading-indicator').classList.remove('hidden');
+        initApp();
+    </script>
+</body>
+</html>
