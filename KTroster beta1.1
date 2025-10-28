@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kill Team Roster Dashboard</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Use Inter font -->
+    <style>
+        @import url('https://fonts.com/css2?family=Inter:wght@100..900&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+
+        /* Custom style for the compact weapon profile grid */
+        .weapon-grid-container {
+            /* Name & Rules, A, Skill, Damage, Delete */
+            display: grid;
+            grid-template-columns: minmax(100px, 3fr) 50px 70px 100px 50px; 
+            gap: 8px; /* Reduced gap for a tighter look */
+            align-items: center;
+        }
+
+        .weapon-grid-header {
+            font-weight: bold;
+            text-transform: uppercase;
+            color: #9ca3af; /* Gray-400 */
+            font-size: 0.75rem; /* text-xs */
+        }
+        
+        /* Ensure table inputs look clean and don't interfere with the row click */
+        .operative-summary input {
+            border: none !important;
+            background-color: transparent !important;
+            padding: 0;
+            margin: 0;
+        }
+        
+        /* Responsive adjustments for the table view */
+        @media (max-width: 768px) {
+            .weapon-grid-container {
+                /* On small screens, stack the name/rules section */
+                grid-template-columns: 1fr 50px 70px 100px 50px; 
+            }
+            .operative-summary td {
+                padding-left: 0.5rem;
+                padding-right: 0.5rem;
+            }
+        }
+
+    </style>
+</head>
+<!-- Switched to a dark, high-contrast theme -->
+<body class="bg-gray-900 text-gray-100 min-h-screen p-4 md:p-8">
+
+    <div id="app-container" class="max-w-4xl mx-auto">
+        <header class="mb-8">
+            <!-- Lighter blue for contrast -->
+            <h1 class="text-4xl font-extrabold text-blue-400 mb-2 tracking-tight">KTDash Roster Builder</h1>
+            <p class="text-gray-400">Manage your operatives and track key stats for your tabletop games. All data saves automatically in your browser.</p>
+            <div id="user-info" class="mt-4 text-sm text-gray-400 flex items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 mr-2 text-blue-400">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" />
+                </svg>
+                Persistence: <span id="user-id" class="font-mono text-xs ml-2 text-blue-400">Local Storage Only (Cross-Tab Sync Enabled)</span>
+            </div>
+        </header>
+
+        <!-- Loading & Error Messages -->
+        <div id="loading-indicator" class="text-center p-6 bg-gray-800 rounded-xl shadow-lg my-8 hidden">
+            <div class="animate-pulse text-blue-400">Loading local data...</div>
+        </div>
+
+        <div id="error-message" class="bg-red-900 border border-red-500 text-red-300 p-4 rounded-xl mb-6 hidden" role="alert">
+            <p class="font-bold">Application Error:</p>
+            <p id="error-text"></p>
+        </div>
+
+        <!-- Roster Name, Add Operative & Export Buttons -->
+        <div class="flex flex-col gap-4 items-stretch mb-6 md:flex-row">
+            <input id="roster-name-input" type="text" placeholder="Enter Roster Name (e.g., Veteran Guardsmen)"
+                   class="flex-grow p-3 bg-gray-800 border border-gray-700 rounded-lg text-lg text-gray-100 placeholder-gray-500 focus:ring-blue-400 focus:border-blue-400 transition duration-150 shadow-md"
+                   oninput="app.updateRosterName(this.value)">
+            
+            <div class="flex gap-4">
+                <button onclick="app.exportDataToJson()"
+                        class="flex-shrink-0 bg-yellow-600 hover:bg-yellow-500 text-gray-900 font-bold py-3 px-4 rounded-lg shadow-lg transition duration-200 transform hover:scale-[1.01] active:scale-[0.99] flex items-center justify-center text-sm md:text-base">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5 mr-2">
+                        <path fill-rule="evenodd" d="M12 2.25a.75.75 0 0 1 .75.75v10.5a.75.75 0 0 1-1.5 0V3a.75.75 0 0 1 .75-.75Zm.97 10.97a.75.75 0 0 0-1.06 0l-4.75 4.75a.75.75 0 0 0 1.06 1.06l4.22-4.22 4.22 4.22a.75.75 0 1 0 1.06-1.06l-4.75-4.75Z" clip-rule="evenodd" />
+                    </svg>
+                    Export JSON
+                </button>
+            
+                <button onclick="app.addOperative()"
+                        class="flex-shrink-0 bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-4 rounded-lg shadow-lg transition duration-200 transform hover:scale-[1.01] active:scale-[0.99] flex items-center justify-center text-sm md:text-base">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5 mr-2">
+                        <path fill-rule="evenodd" d="M12 3.75a.75.75 0 0 1 .75.75v6.75h6.75a.75.75 0 0 1 0 1.5h-6.75v6.75a.75.75 0 0 1-1.5 0v-6.75H4.5a.75.75 0 0 1 0-1.5h6.75V4.5a.75.75 0 0 1 .75-.75Z" clip-rule="evenodd" />
+                    </svg>
+                    Add Operative
+                </button>
+            </div>
+        </div>
+
+        <!-- Operative List Container -->
+        <div class="text-center text-gray-500 p-8 border border-dashed border-gray-700 rounded-xl" id="empty-state">
+            No operatives yet! Click "Add Operative" to start building your kill team.
+        </div>
+        
+        <div id="operative-list-container" class="bg-gray-800 rounded-xl shadow-xl overflow-hidden border border-gray-700 hidden">
+             <!-- The list will be rendered inside this table -->
+             <table id="operative-list" class="min-w-full divide-y divide-gray-700">
+                <!-- Content generated by JS -->
+             </table>
+        </div>
+
+    </div>
+
+    <script>
+        // Use a fixed key for storing data in localStorage
+        const ROSTER_STORAGE_KEY = 'killTeamRosterData';
+        
+        // --- GLOBAL APP STATE & CORE LOGIC ---
+        window.app = {
+            roster: {
+                id: 'my_killteam_roster',
+                name: 'My Kill Team',
+                operatives: []
+            },
+            
+            // Utility function to show errors
+            showError(message) {
+                console.error("Application Error:", message);
+                document.getElementById('error-text').innerText = message;
+                document.getElementById('error-message').classList.remove('hidden');
+            },
+
+            // Generates a simple unique ID for operatives
+            generateId() {
+                return 'op-' + Math.random().toString(36).substring(2, 9);
+            },
+            
+            // Toggles the visibility of the detail row for a specific operative
+            toggleOperativeDetails(id) {
+                const detailRow = document.getElementById(`detail-row-${id}`);
+                const arrowIcon = document.getElementById(`arrow-icon-${id}`);
+                if (detailRow) {
+                    // Use classList.toggle('hidden') for simplicity
+                    const isHidden = detailRow.classList.toggle('hidden');
+                    
+                    if (isHidden) {
+                         // Collapse: arrow points right
+                         arrowIcon.classList.remove('rotate-90');
+                    } else {
+                         // Expand: arrow points down
+                         arrowIcon.classList.add('rotate-90');
+                    }
+                }
+            },
+            
+            // --- NEW: JSON EXPORT FUNCTION ---
+            exportDataToJson() {
+                const dataStr = JSON.stringify(this.roster, null, 2);
+                const blob = new Blob([dataStr], { type: "application/json" });
+                const url = URL.createObjectURL(blob);
+                
+                const a = document.createElement('a');
+                a.href = url;
+                // Clean up roster name for safe filename
+                const filename = `${this.roster.name.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_killteam_roster.json`;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                console.log(`Roster data exported to ${filename}`);
+            },
+
+
+            // --- DATA MANIPULATION & UI RENDERING (Operative Stats) ---
+
+            // Updates a specific field on an operative
+            updateOperativeField(id, field, value) {
+                const operative = this.roster.operatives.find(op => op.id === id);
+                if (operative) {
+                    // Convert numeric fields to number type (Wounds, Move, APL)
+                    if (['wounds', 'currentWounds', 'move', 'apl'].includes(field)) {
+                        operative[field] = parseInt(value) || 0;
+                    } else {
+                        operative[field] = value;
+                    }
+                    
+                    // Ensure currentWounds never exceeds max wounds
+                    if (field === 'currentWounds' && operative.currentWounds > operative.wounds) {
+                        operative.currentWounds = operative.wounds;
+                    }
+                    
+                    this.saveRoster();
+                    
+                    // Re-render the list if essential stats change to update the summary row/bar
+                    if (['wounds', 'currentWounds', 'move', 'apl', 'save', 'name'].includes(field)) {
+                        this.renderOperativeList(); 
+                    }
+                    // For other fields (like ability), we rely on native input updates.
+                }
+            },
+
+            // Updates the Roster Name
+            updateRosterName(name) {
+                this.roster.name = name;
+                this.saveRoster();
+            },
+
+            // Adds a new operative to the roster
+            addOperative() {
+                const opCount = this.roster.operatives.length + 1;
+                const newOp = {
+                    id: this.generateId(),
+                    name: `New Operative ${opCount}`,
+                    wounds: 10,
+                    currentWounds: 10,
+                    move: 3,
+                    save: '4+',
+                    apl: 2,
+                    ability: "N/A",
+                    weapons: [
+                        { id: this.generateId() + '-wr1', name: "Bolter", type: "Ranged", attacks: 4, skill: "3+", damageNormal: 3, damageCrit: 4, specialRules: "AP1" },
+                        { id: this.generateId() + '-wm1', name: "Fists/Knife", type: "Melee", attacks: 3, skill: "4+", damageNormal: 2, damageCrit: 3, specialRules: "Rending" },
+                        { id: this.generateId() + '-we1', name: "Frag Grenade", type: "Equipment", attacks: 0, skill: "-", damageNormal: 2, damageCrit: 3, specialRules: "Area, Blast" }
+                    ],
+                };
+                this.roster.operatives.push(newOp);
+                this.saveRoster();
+                this.renderOperativeList(); 
+                
+                // Automatically expand the newly added operative
+                setTimeout(() => this.toggleOperativeDetails(newOp.id), 0);
+            },
+            
+            // Removes an operative
+            removeOperative(id) {
+                this.roster.operatives = this.roster.operatives.filter(op => op.id !== id);
+                this.saveRoster();
+                this.renderOperativeList();
+            },
+
+            // --- DATA MANIPULATION (Weapons) ---
+
+            // Adds a new weapon to a specific operative
+            addOperativeWeapon(opId, type = "Ranged") {
+                const operative = this.roster.operatives.find(op => op.id === opId);
+                if (operative) {
+                    if (!operative.weapons) operative.weapons = [];
+                    let defaultName = "New Ranged Weapon";
+                    let defaultSkill = "3+";
+                    let defaultRules = "P1";
+                    
+                    if (type === 'Melee') {
+                        defaultName = "New Melee Weapon";
+                        defaultSkill = "3+";
+                        defaultRules = "Lethal 5+";
+                    } else if (type === 'Equipment') {
+                        defaultName = "New Equipment";
+                        defaultSkill = "-";
+                        defaultRules = "Utility";
+                    }
+
+                    operative.weapons.push({
+                        id: this.generateId() + '-w',
+                        name: defaultName,
+                        type: type,
+                        attacks: type === 'Equipment' ? 0 : 4,
+                        skill: defaultSkill,
+                        damageNormal: type === 'Equipment' ? 0 : 3,
+                        damageCrit: type === 'Equipment' ? 0 : 4,
+                        specialRules: defaultRules
+                    });
+                    this.saveRoster();
+                    this.renderOperativeList(); // CRITICAL: Redraw to show the new weapon row
+                    
+                    // Re-expand the operative after re-render if it was open
+                    const wasExpanded = document.getElementById(`detail-row-${opId}`) && !document.getElementById(`detail-row-${opId}`).classList.contains('hidden');
+                    if (wasExpanded) {
+                         setTimeout(() => this.toggleOperativeDetails(opId), 0);
+                    }
+                }
+            },
+
+            // Removes a weapon from an operative
+            removeOperativeWeapon(opId, wId) {
+                const operative = this.roster.operatives.find(op => op.id === opId);
+                if (operative && operative.weapons) {
+                    operative.weapons = operative.weapons.filter(w => w.id !== wId);
+                    this.saveRoster();
+                    this.renderOperativeList();
+                    // Keep the operative row expanded after deletion
+                    setTimeout(() => {
+                        const detailRow = document.getElementById(`detail-row-${opId}`);
+                        if (detailRow && detailRow.classList.contains('hidden')) {
+                            this.toggleOperativeDetails(opId);
+                        }
+                    }, 0);
+                }
+            },
+
+            // Updates a field on a specific weapon
+            updateWeaponField(opId, wId, field, value) {
+                const operative = this.roster.operatives.find(op => op.id === opId);
+                if (operative && operative.weapons) {
+                    const weapon = operative.weapons.find(w => w.id === wId);
+                    if (weapon) {
+                        if (['attacks', 'damageNormal', 'damageCrit'].includes(field)) {
+                            weapon[field] = parseInt(value) || 0;
+                        } else {
+                            weapon[field] = value;
+                        }
+                        this.saveRoster();
+                        
+                        // We must re-render to update the weapon display, especially for type changes 
+                        // that affect input fields (like Equipment disabling inputs).
+                        this.renderOperativeList();
+                        
+                        // Keep the operative row expanded after the re-render
+                        setTimeout(() => {
+                            const detailRow = document.getElementById(`detail-row-${opId}`);
+                            if (detailRow && detailRow.classList.contains('hidden')) {
+                                this.toggleOperativeDetails(opId);
+                            }
+                        }, 0);
+                    }
+                }
+            },
+            
+            // --- CROSS-TAB SYNC HANDLER ---
+            handleStorageChange(event) {
+                if (event.key === ROSTER_STORAGE_KEY && event.newValue !== null) {
+                    console.log("External storage change detected. Auto-refreshing UI.");
+                    try {
+                        const newData = JSON.parse(event.newValue);
+                        this.roster = { ...this.roster, ...newData };
+                        this.renderOperativeList();
+                    } catch (e) {
+                        this.showError(`Error parsing externally saved data: ${e.message}`);
+                    }
+                }
+            },
+
+            // --- UI RENDERING (Icons & Weapons) ---
+            
+            getIconSvg(type) {
+                if (type === 'Ranged') {
+                    return `<span title="Ranged" class="text-blue-400">🎯</span>`;
+                } else if (type === 'Melee') {
+                    return `<span title="Melee" class="text-red-400">⚔️</span>`;
+                } else if (type === 'Equipment') {
+                    return `<span title="Equipment" class="text-green-400">⚙️</span>`;
+                }
+                return '<span>?</span>';
+            },
+
+            // Helper function to render the weapon list for an operative
+            getWeaponsHtml(op) {
+                if (!op.weapons || !Array.isArray(op.weapons) || op.weapons.length === 0) {
+                    return `<p class="text-gray-600 italic p-2 text-center">No weapons assigned.</p>`;
+                }
+
+                const header = `
+                    <div class="weapon-grid-container text-gray-400 font-bold border-b border-gray-600 pb-2 mb-2">
+                        <div class="col-span-1 weapon-grid-header">Weapon Name & Rules</div>
+                        <div class="text-center weapon-grid-header">A</div>
+                        <div class="text-center weapon-grid-header">BS/WS</div>
+                        <div class="text-center weapon-grid-header">D (N/C)</div>
+                        <div></div> <!-- Delete placeholder -->
+                    </div>
+                `;
+
+                const rows = op.weapons.map(w => {
+                    const isEquipment = w.type === 'Equipment';
+                    const attacksValue = w.attacks || (isEquipment ? '-' : 0);
+                    const skillValue = w.skill || (isEquipment ? '-' : '');
+                    const damageNormalValue = w.damageNormal || (isEquipment ? '-' : 0);
+                    const damageCritValue = w.damageCrit || (isEquipment ? '-' : 0);
+
+                    const attacksInputType = isEquipment ? 'text' : 'number';
+                    const damageInputType = isEquipment ? 'text' : 'number';
+
+                    return `
+                        <div class="weapon-grid-container items-start py-1 border-b border-gray-700 last:border-b-0">
+                            <!-- Icon, Name & Rules -->
+                            <div class="flex flex-col space-y-1">
+                                <!-- Icon and Name -->
+                                <div class="flex items-center space-x-2">
+                                    ${this.getIconSvg(w.type)}
+                                    <input type="text" value="${w.name}" placeholder="Name"
+                                        oninput="app.updateWeaponField('${op.id}', '${w.id}', 'name', this.value)"
+                                        class="flex-grow p-1 bg-gray-700 rounded text-gray-100 font-semibold outline-none text-sm min-w-0 border border-gray-600 focus:border-blue-400">
+                                </div>
+                                
+                                <!-- Special Rules Input -->
+                                <div class="flex items-center space-x-2 text-xs">
+                                    <span class="text-gray-500 ml-5 italic">(Rules):</span>
+                                    <input type="text" value="${w.specialRules}" placeholder="e.g. P1, Rending, Silent"
+                                        oninput="app.updateWeaponField('${op.id}', '${w.id}', 'specialRules', this.value)"
+                                        class="w-full p-1 bg-gray-700 rounded text-gray-300 outline-none border border-gray-600 focus:border-blue-400">
+                                </div>
+
+                                <!-- Type Switcher -->
+                                <select onchange="app.updateWeaponField('${op.id}', '${w.id}', 'type', this.value)"
+                                    class="w-full text-xs p-1 bg-gray-600 rounded text-gray-100 outline-none mt-1 border border-gray-600 focus:border-blue-400">
+                                    <option value="Ranged" ${w.type === 'Ranged' ? 'selected' : ''}>Ranged</option>
+                                    <option value="Melee" ${w.type === 'Melee' ? 'selected' : ''}>Melee</option>
+                                    <option value="Equipment" ${w.type === 'Equipment' ? 'selected' : ''}>Equipment</option>
+                                </select>
+                            </div>
+
+                            <!-- Attacks (A) -->
+                            <div class="text-center">
+                                <input type="${attacksInputType}" value="${attacksValue}" ${isEquipment ? 'disabled' : ''}
+                                    oninput="app.updateWeaponField('${op.id}', '${w.id}', 'attacks', this.value)"
+                                    class="w-full text-center bg-gray-700 rounded text-blue-400 font-bold p-1 outline-none border border-gray-600 disabled:bg-gray-800 disabled:text-gray-500 focus:border-blue-400">
+                            </div>
+
+                            <!-- Skill (BS / WS) -->
+                            <div class="text-center">
+                                <input type="text" value="${skillValue}" placeholder="3+" ${isEquipment ? 'disabled' : ''}
+                                    oninput="app.updateWeaponField('${op.id}', '${w.id}', 'skill', this.value)"
+                                    class="w-full text-center bg-gray-700 rounded text-blue-400 font-bold p-1 outline-none border border-gray-600 disabled:bg-gray-800 disabled:text-gray-500 focus:border-blue-400">
+                            </div>
+
+                            <!-- Damage (Normal / Crit) -->
+                            <div class="flex space-x-1 text-center">
+                                <input type="${damageInputType}" value="${damageNormalValue}" ${isEquipment ? 'disabled' : ''}
+                                    oninput="app.updateWeaponField('${op.id}', '${w.id}', 'damageNormal', this.value)"
+                                    class="w-1/2 text-center bg-gray-700 rounded text-blue-400 font-bold p-1 outline-none border border-gray-600 disabled:bg-gray-800 disabled:text-gray-500 focus:border-blue-400">
+                                <input type="${damageInputType}" value="${damageCritValue}" ${isEquipment ? 'disabled' : ''}
+                                    oninput="app.updateWeaponField('${op.id}', '${w.id}', 'damageCrit', this.value)"
+                                    class="w-1/2 text-center bg-gray-700 rounded text-blue-400 font-bold p-1 outline-none border border-gray-600 disabled:bg-gray-800 disabled:text-gray-500 focus:border-blue-400">
+                            </div>
+
+                            <!-- Delete Button (Red X) -->
+                            <button onclick="app.removeOperativeWeapon('${op.id}', '${w.id}')" title="Remove Weapon"
+                                class="text-red-400 hover:text-red-500 transition duration-150 p-1 rounded-full hover:bg-gray-700 self-center">
+                                <!-- RED X ICON -->
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-5 h-5">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+                    `;
+                }).join('');
+
+                return `
+                    <div class="space-y-3">
+                        ${header}
+                        ${rows}
+                    </div>
+                `;
+            },
+
+
+            // Main rendering function for the operative list - modified for table view
+            renderOperativeList() {
+                const container = document.getElementById('operative-list'); // This is the <table> element
+                const listContainer = document.getElementById('operative-list-container');
+                const emptyState = document.getElementById('empty-state');
+                
+                if (this.roster.operatives.length === 0) {
+                    emptyState.classList.remove('hidden');
+                    if (listContainer) listContainer.classList.add('hidden'); // Hide table container if empty
+                    container.innerHTML = '';
+                    return;
+                } else {
+                    emptyState.classList.add('hidden');
+                    if (listContainer) listContainer.classList.remove('hidden'); // Show table container
+                }
+
+                // Table Header
+                let html = `
+                    <thead class="bg-gray-700">
+                        <tr>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider w-8"></th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Operative</th>
+                            <th class="px-4 py-3 text-center text-xs font-medium text-gray-300 uppercase tracking-wider w-20">APL</th>
+                            <th class="px-4 py-3 text-center text-xs font-medium text-gray-300 uppercase tracking-wider w-24">M</th>
+                            <th class="px-4 py-3 text-center text-xs font-medium text-gray-300 uppercase tracking-wider w-24">Sv</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider w-40">Wounds</th>
+                            <th class="px-4 py-3 text-right text-xs font-medium text-gray-300 uppercase tracking-wider w-16"></th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-700">
+                `;
+
+                // Table Rows
+                html += this.roster.operatives.map(op => {
+                    const woundBar = this.getWoundBarHtml(op.currentWounds, op.wounds);
+                    
+                    return `
+                        <!-- SUMMARY ROW (Clickable to expand details) -->
+                        <tr class="operative-summary bg-gray-800 hover:bg-gray-700/70 transition duration-150 border-t border-gray-700" 
+                            onclick="app.toggleOperativeDetails('${op.id}')" title="Click to view/edit details">
+                            
+                            <!-- Expand Arrow -->
+                            <td class="px-4 py-4 whitespace-nowrap text-sm font-medium text-blue-400">
+                                <svg id="arrow-icon-${op.id}" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 transition-transform duration-200">
+                                    <path fill-rule="evenodd" d="M7.21 14.77a.75.75 0 0 1 .75.75.75 0 0 1-1.06 0L2.47 11.22a.75.75 0 0 1 0-1.06l3.68-3.68a.75.75 0 1 1 1.06 1.06l-3.15 3.14 3.15 3.15Z" clip-rule="evenodd" />
+                                </svg>
+                            </td>
+
+                            <!-- Operative Name -->
+                            <td class="px-4 py-4">
+                                <input type="text" value="${op.name}" placeholder="Name"
+                                    oninput="app.updateOperativeField('${op.id}', 'name', this.value)"
+                                    onclick="event.stopPropagation()"
+                                    class="w-full text-base font-semibold text-blue-300 hover:text-blue-200 outline-none">
+                            </td>
+
+                            <!-- APL -->
+                            <td class="px-4 py-4 text-sm font-mono text-center">
+                                <input type="number" value="${op.apl}" min="1" 
+                                    oninput="app.updateOperativeField('${op.id}', 'apl', this.value)"
+                                    onclick="event.stopPropagation()"
+                                    class="w-12 text-center text-blue-400 font-mono focus:border focus:border-gray-600 focus:bg-gray-700 rounded p-1">
+                            </td>
+
+                            <!-- Move (M) -->
+                            <td class="px-4 py-4 text-sm font-mono text-center">
+                                <input type="number" value="${op.move}" min="0" 
+                                    oninput="app.updateOperativeField('${op.id}', 'move', this.value)"
+                                    onclick="event.stopPropagation()"
+                                    class="w-12 text-center text-blue-400 font-mono focus:border focus:border-gray-600 focus:bg-gray-700 rounded p-1">
+                            </td>
+
+                            <!-- Save (Sv) -->
+                            <td class="px-4 py-4 text-sm font-mono text-center">
+                                <input type="text" value="${op.save}" placeholder="4+"
+                                    oninput="app.updateOperativeField('${op.id}', 'save', this.value)"
+                                    onclick="event.stopPropagation()"
+                                    class="w-12 text-center text-blue-400 font-mono focus:border focus:border-gray-600 focus:bg-gray-700 rounded p-1">
+                            </td>
+
+                            <!-- Wounds / Wound Bar -->
+                            <td class="px-4 py-4">
+                                <div class="flex items-center space-x-2 mb-1">
+                                    <input type="number" value="${op.currentWounds}" min="0" max="${op.wounds}"
+                                        oninput="app.updateOperativeField('${op.id}', 'currentWounds', this.value)"
+                                        onclick="event.stopPropagation()"
+                                        class="w-10 p-1 bg-gray-700 rounded text-center text-red-400 font-mono border border-gray-600 focus:border-blue-400">
+                                    <span class="text-gray-400">/</span>
+                                    <input type="number" value="${op.wounds}" min="1"
+                                        oninput="app.updateOperativeField('${op.id}', 'wounds', this.value)"
+                                        onclick="event.stopPropagation()"
+                                        class="w-10 p-1 bg-gray-700 rounded text-center text-gray-300 font-mono border border-gray-600 focus:border-blue-400">
+                                </div>
+                                ${woundBar}
+                            </td>
+
+                            <!-- Remove Button (Summary - Red X) -->
+                            <td class="px-4 py-4 text-right whitespace-nowrap text-sm font-medium">
+                                <button onclick="event.stopPropagation(); app.removeOperative('${op.id}')" title="Delete Operative"
+                                    class="text-red-500 hover:text-red-400 transition duration-150 p-1 rounded-full hover:bg-gray-700">
+                                    <!-- RED X ICON -->
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-5 h-5">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
+                                    </svg>
+                                </button>
+                            </td>
+                        </tr>
+
+                        <!-- DETAIL ROW (Hidden by default, spans all columns) -->
+                        <tr id="detail-row-${op.id}" class="operative-details bg-gray-900 hidden">
+                            <td colspan="7" class="p-6">
+                                <div class="space-y-6">
+                                    <!-- Ability / Keywords -->
+                                    <div class="p-4 bg-gray-800 rounded-lg border border-gray-700">
+                                        <label class="block text-gray-400 font-medium mb-2 text-sm">Ability/Keywords (Full Rules)</label>
+                                        <input type="text" value="${op.ability}" placeholder="e.g. Relentless, Grapple"
+                                            oninput="app.updateOperativeField('${op.id}', 'ability', this.value)"
+                                            class="w-full p-2 bg-gray-700 rounded text-gray-300 outline-none border border-gray-600 focus:border-blue-400">
+                                    </div>
+                                    
+                                    <!-- Weapons Section -->
+                                    <div class="p-4 bg-gray-800 rounded-lg border border-gray-700">
+                                        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 space-y-2 sm:space-y-0">
+                                            <h3 class="text-lg font-bold text-gray-200">Weapons Profiles</h3>
+                                            <div class="flex flex-wrap gap-2">
+                                                <button onclick="app.addOperativeWeapon('${op.id}', 'Ranged')"
+                                                        class="text-blue-400 hover:text-blue-300 transition duration-150 flex items-center text-xs font-medium py-1 px-2 rounded-md border border-blue-400 hover:border-blue-300 bg-gray-900">
+                                                    🎯 Ranged
+                                                </button>
+                                                <button onclick="app.addOperativeWeapon('${op.id}', 'Melee')"
+                                                        class="text-red-400 hover:text-red-300 transition duration-150 flex items-center text-xs font-medium py-1 px-2 rounded-md border border-red-400 hover:border-red-300 bg-gray-900">
+                                                    ⚔️ Melee
+                                                </button>
+                                                <button onclick="app.addOperativeWeapon('${op.id}', 'Equipment')"
+                                                        class="text-green-400 hover:text-green-300 transition duration-150 flex items-center text-xs font-medium py-1 px-2 rounded-md border border-green-400 hover:border-green-300 bg-gray-900">
+                                                    ⚙️ Equipment
+                                                </button>
+                                            </div>
+                                        </div>
+                                        ${this.getWeaponsHtml(op)}
+                                    </div>
+
+                                </div>
+                            </td>
+                        </tr>
+                    `;
+                }).join('');
+                
+                html += `</tbody></table>`;
+                
+                container.innerHTML = html;
+                
+                // Ensure name input is updated after load/render
+                document.getElementById('roster-name-input').value = this.roster.name;
+            },
+
+            // Generates the visual wound bar
+            getWoundBarHtml(current, max) {
+                const percentage = max > 0 ? (current / max) * 100 : 0;
+                let color = 'bg-green-500';
+                if (percentage < 33) {
+                    color = 'bg-red-500';
+                } else if (percentage < 66) {
+                    color = 'bg-yellow-500';
+                }
+                
+                return `
+                    <div class="mt-1 h-1.5 bg-gray-600 rounded-full overflow-hidden">
+                        <div class="${color} h-full transition-all duration-500 ease-in-out" style="width: ${percentage}%;"></div>
+                    </div>
+                `;
+            },
+            
+            // --- LOCAL STORAGE INTERACTION ---
+
+            // Save the current roster to localStorage
+            saveRoster() {
+                try {
+                    localStorage.setItem(ROSTER_STORAGE_KEY, JSON.stringify(this.roster));
+                } catch (e) {
+                    this.showError(`Failed to save roster to local storage: ${e.message}. Storage might be full.`);
+                }
+            },
+
+            // Load the roster from localStorage (replaces Firebase Listener)
+            loadRoster() {
+                document.getElementById('loading-indicator').classList.add('hidden');
+
+                try {
+                    const storedData = localStorage.getItem(ROSTER_STORAGE_KEY);
+                    if (storedData) {
+                        const data = JSON.parse(storedData);
+                        this.roster = { ...this.roster, ...data };
+                        
+                        // Defensive data migration/cleanup logic
+                        this.roster.operatives = this.roster.operatives.map(op => {
+                            op.apl = op.apl || 2;
+                            op.weapons = op.weapons || [];
+                            if (op.currentWounds > op.wounds) { op.currentWounds = op.wounds; }
+                            
+                            op.weapons = op.weapons.map(w => {
+                                w.id = w.id || this.generateId() + '-w';
+                                w.type = w.type || 'Ranged';
+                                w.damageNormal = w.damageNormal || 0;
+                                w.damageCrit = w.damageCrit || 0;
+                                w.specialRules = w.specialRules || "";
+                                return w;
+                            });
+                            return op;
+                        });
+                    } else {
+                        // If no data, use the default empty roster
+                        this.saveRoster(); 
+                    }
+                    
+                    this.renderOperativeList();
+
+                } catch (error) {
+                    this.showError(`Local storage retrieval failed: ${error.message}.`);
+                }
+            }
+        };
+
+        // --- APPLICATION INITIALIZATION ---
+
+        function initApp() {
+            // 1. Load initial data
+            window.app.loadRoster();
+            
+            // 2. Add listener for cross-tab synchronization
+            window.addEventListener('storage', window.app.handleStorageChange.bind(window.app));
+        }
+
+        // Start the application
+        document.getElementById('loading-indicator').classList.remove('hidden');
+        initApp();
+    </script>
+</body>
+</html>
